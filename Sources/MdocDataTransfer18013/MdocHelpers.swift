@@ -105,7 +105,7 @@ public class MdocHelpers {
 			guard var sessionEncryption else { logger.error("Session Encryption not initialized"); return .failure(Self.makeError(code: .sessionEncryptionNotInitialized)) }
 			guard let requestData = try sessionEncryption.decrypt(requestCipherData) else { logger.error("Request data cannot be decrypted"); return .failure(Self.makeError(code: .requestDecodeError)) }
 			guard let deviceRequest = DeviceRequest(data: requestData) else { logger.error("Decrypted data cannot be decoded"); return .failure(Self.makeError(code: .requestDecodeError)) }
-			guard let (drTest, validRequestItems, errorRequestItems) = try Self.getDeviceResponseToSend(deviceRequest: deviceRequest, issuerSigned: docs, selectedItems: nil, sessionEncryption: sessionEncryption, eReaderKey: sessionEncryption.sessionKeys.publicKey, devicePrivateKeys: devicePrivateKeys, dauthMethod: dauthMethod) else { logger.error("Valid request items nil"); return .failure(Self.makeError(code: .requestDecodeError)) }
+            guard let (drTest, validRequestItems, errorRequestItems) = try Self.getDeviceResponseToSend(deviceRequest: deviceRequest, issuerSigned: docs, selectedItems: nil, sessionEncryption: sessionEncryption, eReaderKey: sessionEncryption.sessionKeys.publicKey, devicePrivateKeys: devicePrivateKeys, dauthMethod: dauthMethod, dryRun: true, delegate: nil) else { logger.error("Valid request items nil"); return .failure(Self.makeError(code: .requestDecodeError)) }
 			let bInvalidReq = (drTest.documents == nil)
 			var userRequestInfo = UserRequestInfo(validItemsRequested: validRequestItems, errorItemsRequested: errorRequestItems)
 			if let docR = deviceRequest.docRequests.first {
@@ -131,7 +131,7 @@ public class MdocHelpers {
 	///   - sessionTranscript: Session Transcript object
 	///   - dauthMethod: Mdoc Authentication method
 	/// - Returns: (Device response object, valid requested items, error request items) tuple
-	public static func getDeviceResponseToSend(deviceRequest: DeviceRequest?, issuerSigned: [String: IssuerSigned], selectedItems: RequestItems? = nil, sessionEncryption: SessionEncryption? = nil, eReaderKey: CoseKey? = nil, devicePrivateKeys: [String: CoseKeyPrivate], sessionTranscript: SessionTranscript? = nil, dauthMethod: DeviceAuthMethod) throws -> (response: DeviceResponse, validRequestItems: RequestItems, errorRequestItems: RequestItems)? {
+    public static func getDeviceResponseToSend(deviceRequest: DeviceRequest?, issuerSigned: [String: IssuerSigned], selectedItems: RequestItems? = nil, sessionEncryption: SessionEncryption? = nil, eReaderKey: CoseKey? = nil, devicePrivateKeys: [String: CoseKeyPrivate], sessionTranscript: SessionTranscript? = nil, dauthMethod: DeviceAuthMethod, dryRun: Bool = false, delegate: MdocOfflineDelegate?) throws -> (response: DeviceResponse, validRequestItems: RequestItems, errorRequestItems: RequestItems)? {
 		var docFiltered = [Document](); var docErrors = [[DocType: UInt64]]()
 		var validReqItemsDocDict = RequestItems(); var errorReqItemsDocDict = RequestItems()
 		guard deviceRequest != nil || selectedItems != nil else { fatalError("Invalid call") }
@@ -152,6 +152,8 @@ public class MdocHelpers {
 			}
 			let devicePrivateKey = devicePrivateKeys[reqDocIdOrDocType] ?? CoseKeyPrivate(crv: .p256) // used only if doc.id
 			let doc = if haveSelectedItems { issuerSigned[reqDocIdOrDocType]! } else { Array(issuerSigned.values).findDoc(name: reqDocIdOrDocType)!.0 }
+            let docName = issuerSigned.first(where: { $0.value.taggedEncoded == doc.taggedEncoded })!.key
+
 			// Document's data must be in CBOR bytes that has the IssuerSigned structure according to ISO 23220-4
 			// Currently, the library does not support IssuerSigned structure without the nameSpaces field.
 			guard let issuerNs = doc.issuerNameSpaces else { logger.error("Document does not contain issuer namespaces"); return nil }
@@ -189,17 +191,24 @@ public class MdocHelpers {
 				let issToAdd = IssuerSigned(issuerNameSpaces: IssuerNameSpaces(nameSpaces: nsItemsToAdd), issuerAuth: issuerAuthToAdd)
 				var devSignedToAdd: DeviceSigned? = nil
 				let sessionTranscript = sessionEncryption?.transcript ?? sessionTranscript
-				if let eReaderKey, let sessionTranscript {
+				if let eReaderKey, let sessionTranscript, dryRun == false {
 					let authKeys = CoseKeyExchange(publicKey: eReaderKey, privateKey: devicePrivateKey)
 					let mdocAuth = MdocAuthentication(transcript: sessionTranscript, authKeys: authKeys)
-					guard let devAuth = try mdocAuth.getDeviceAuthForTransfer(docType: doc.issuerAuth.mso.docType, dauthMethod: dauthMethod) else {
-						logger.error("Cannot create device auth"); return nil
-					}
-					devSignedToAdd = DeviceSigned(deviceAuth: devAuth)
+                    if let delegate = delegate, let sessionTranscriptBytes = sessionEncryption?.sessionTranscriptBytes, dauthMethod == .deviceSignature {
+                        guard let signature = delegate.signData(documentId: reqDocIdOrDocType, docType: doc.issuerAuth.mso.docType, sessionTranscriptBytes: Data(sessionTranscriptBytes)) else {
+                            logger.error("Cannot create signature"); return nil
+                        }
+                        devSignedToAdd = DeviceSigned(deviceAuth: .init(coseMacOrSignature: Cose(type: .sign1, algorithm: Cose.MacAlgorithm.hmac256.rawValue, signature: signature)))
+                    } else {
+                        guard let devAuth = try mdocAuth.getDeviceAuthForTransfer(docType: doc.issuerAuth.mso.docType, dauthMethod: dauthMethod) else {
+                            logger.error("Cannot create device auth"); return nil
+                        }
+                        devSignedToAdd = DeviceSigned(deviceAuth: devAuth)
+                    }
 				}
 				let docToAdd = Document(docType: doc.issuerAuth.mso.docType, issuerSigned: issToAdd, deviceSigned: devSignedToAdd, errors: errors)
 				docFiltered.append(docToAdd)
-				validReqItemsDocDict[doc.issuerAuth.mso.docType] = validReqItemsNsDict
+                validReqItemsDocDict[docName] = validReqItemsNsDict
 			} else {
 				docErrors.append([doc.issuerAuth.mso.docType: UInt64(0)])
 			}

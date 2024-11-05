@@ -10,6 +10,7 @@ public protocol MdocOfflineDelegate: AnyObject {
 	func didChangeStatus(_ newStatus: TransferStatus)
 	func didFinishedWithError(_ error: Error)
 	func didReceiveRequest(_ request: UserRequestInfo, handleSelected: @escaping (Bool, RequestItems?) -> Void)
+    func signData(documentId: String, docType: String, sessionTranscriptBytes: Data) -> Data?
 }
 
 
