@@ -37,7 +37,7 @@ public class MdocGattServer: @unchecked Sendable, ObservableObject {
 	public var sessionEncryption: SessionEncryption?
 	public var docs: [String: IssuerSigned]!
 	public var iaca: [SecCertificate]!
-	public var devicePrivateKeys: [String: CoseKeyPrivate]!
+	public var devicePrivateKeys: [String: CoseKeyPrivate]?
 	public var dauthMethod: DeviceAuthMethod
 	public var readerName: String?
 	public var qrCodePayload: String?

@@ -33,7 +33,7 @@ public typealias RequestItems = [String: [String: [String]]]
 /// Helper methods
 public class MdocHelpers {
 	
-	public static func initializeData(parameters: [String: Any]) -> (docs: [String: IssuerSigned], devicePrivateKeys: [String: CoseKeyPrivate], iaca: [SecCertificate]?, dauthMethod: DeviceAuthMethod)? {
+	public static func initializeData(parameters: [String: Any]) -> (docs: [String: IssuerSigned], devicePrivateKeys: [String: CoseKeyPrivate]?, iaca: [SecCertificate]?, dauthMethod: DeviceAuthMethod)? {
 		var docs: [String: IssuerSigned]?
 		var devicePrivateKeys: [String: CoseKeyPrivate]?
 		var iaca: [SecCertificate]?
@@ -44,20 +44,27 @@ public class MdocHelpers {
 			let randomIds = (0..<d.count).map { _ in UUID().uuidString }
 			docs = Dictionary(uniqueKeysWithValues: sampleData.compactMap { $0.deviceResponse?.documents?.map(\.issuerSigned).first }.enumerated().map { (randomIds[$0], $1) })
 			devicePrivateKeys = Dictionary(uniqueKeysWithValues: sampleData.compactMap { $0.devicePrivateKey }.enumerated().map { (randomIds[$0], $1) })
-		} else if let issObjs = parameters[InitializeKeys.document_signup_issuer_signed_obj.rawValue] as? [String: IssuerSigned], let dpk = parameters[InitializeKeys.device_private_key_obj.rawValue] as? [String: CoseKeyPrivate] {
+		} else if let issObjs = parameters[InitializeKeys.document_signup_issuer_signed_obj.rawValue] as? [String: IssuerSigned] {
 			docs = issObjs
-			devicePrivateKeys = dpk
-		} else if let issData = parameters[InitializeKeys.document_signup_issuer_signed_data.rawValue] as? [String: Data], let dpks = parameters[InitializeKeys.device_private_key_data.rawValue] as? [String: Data] {
+		} else if let issData = parameters[InitializeKeys.document_signup_issuer_signed_data.rawValue] as? [String: Data] {
 			docs = issData.compactMapValues({ IssuerSigned(data: [UInt8]($0))})
-			devicePrivateKeys = dpks.mapValues { CoseKeyPrivate(privateKeyx963Data: $0, crv: .p256) }
 		}
+
+        if let dpk = parameters[InitializeKeys.device_private_key_obj.rawValue] as? [String: CoseKeyPrivate] {
+            devicePrivateKeys = dpk
+        } else if let dpks = parameters[InitializeKeys.device_private_key_data.rawValue] as? [String: Data] {
+            devicePrivateKeys = dpks.mapValues { CoseKeyPrivate(privateKeyx963Data: $0, crv: .p256) }
+        }
+
+
 		if let i = parameters[InitializeKeys.trusted_certificates.rawValue] as? [Data] {
 			iaca = i.compactMap { SecCertificateCreateWithData(nil, $0 as CFData) }
 		}
 		if let d = parameters[InitializeKeys.device_auth_method.rawValue] as? String, let dam = DeviceAuthMethod(rawValue: d) {
 			deviceAuthMethod = dam
 		}
-		guard let docs, let devicePrivateKeys else { return nil }
+		guard let docs else { return nil }
+
 		return (docs, devicePrivateKeys, iaca, deviceAuthMethod)
 	}
 	
@@ -92,7 +99,7 @@ public class MdocHelpers {
 	///   - handOver: handOver structure
 	/// - Returns: A ``DeviceRequest`` object
 
-	public static func decodeRequestAndInformUser(deviceEngagement: DeviceEngagement?, docs: [String: IssuerSigned], iaca: [SecCertificate], requestData: Data, devicePrivateKeys: [String: CoseKeyPrivate], dauthMethod: DeviceAuthMethod, readerKeyRawData: [UInt8]?, handOver: CBOR) -> Result<(sessionEncryption: SessionEncryption, deviceRequest: DeviceRequest, userRequestInfo: UserRequestInfo, isValidRequest: Bool), Error> {
+	public static func decodeRequestAndInformUser(deviceEngagement: DeviceEngagement?, docs: [String: IssuerSigned], iaca: [SecCertificate], requestData: Data, devicePrivateKeys: [String: CoseKeyPrivate]?, dauthMethod: DeviceAuthMethod, readerKeyRawData: [UInt8]?, handOver: CBOR) -> Result<(sessionEncryption: SessionEncryption, deviceRequest: DeviceRequest, userRequestInfo: UserRequestInfo, isValidRequest: Bool), Error> {
 		do {
 			guard let seCbor = try CBOR.decode([UInt8](requestData)) else { logger.error("Request Data is not Cbor"); return .failure(Self.makeError(code: .requestDecodeError)) }
 			guard var se = SessionEstablishment(cbor: seCbor) else { logger.error("Request Data cannot be decoded to session establisment"); return .failure(Self.makeError(code: .requestDecodeError)) }
@@ -131,7 +138,7 @@ public class MdocHelpers {
 	///   - sessionTranscript: Session Transcript object
 	///   - dauthMethod: Mdoc Authentication method
 	/// - Returns: (Device response object, valid requested items, error request items) tuple
-    public static func getDeviceResponseToSend(deviceRequest: DeviceRequest?, issuerSigned: [String: IssuerSigned], selectedItems: RequestItems? = nil, sessionEncryption: SessionEncryption? = nil, eReaderKey: CoseKey? = nil, devicePrivateKeys: [String: CoseKeyPrivate], sessionTranscript: SessionTranscript? = nil, dauthMethod: DeviceAuthMethod, dryRun: Bool = false, delegate: MdocOfflineDelegate?) throws -> (response: DeviceResponse, validRequestItems: RequestItems, errorRequestItems: RequestItems)? {
+    public static func getDeviceResponseToSend(deviceRequest: DeviceRequest?, issuerSigned: [String: IssuerSigned], selectedItems: RequestItems? = nil, sessionEncryption: SessionEncryption? = nil, eReaderKey: CoseKey? = nil, devicePrivateKeys: [String: CoseKeyPrivate]?, sessionTranscript: SessionTranscript? = nil, dauthMethod: DeviceAuthMethod, dryRun: Bool = false, delegate: MdocOfflineDelegate?) throws -> (response: DeviceResponse, validRequestItems: RequestItems, errorRequestItems: RequestItems)? {
 		var docFiltered = [Document](); var docErrors = [[DocType: UInt64]]()
 		var validReqItemsDocDict = RequestItems(); var errorReqItemsDocDict = RequestItems()
 		guard deviceRequest != nil || selectedItems != nil else { fatalError("Invalid call") }
@@ -150,7 +157,7 @@ public class MdocHelpers {
 			} else {
 				guard issuerSigned[reqDocIdOrDocType] != nil else { continue }
 			}
-			let devicePrivateKey = devicePrivateKeys[reqDocIdOrDocType] ?? CoseKeyPrivate(crv: .p256) // used only if doc.id
+			let devicePrivateKey = devicePrivateKeys?[reqDocIdOrDocType] ?? CoseKeyPrivate(crv: .p256) // used only if doc.id
 			let doc = if haveSelectedItems { issuerSigned[reqDocIdOrDocType]! } else { Array(issuerSigned.values).findDoc(name: reqDocIdOrDocType)!.0 }
             let docName = issuerSigned.first(where: { $0.value.taggedEncoded == doc.taggedEncoded })!.key
 
