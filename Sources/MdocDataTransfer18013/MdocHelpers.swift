@@ -198,7 +198,7 @@ public class MdocHelpers {
                         guard let signature = delegate.signData(documentId: reqDocIdOrDocType, docType: doc.issuerAuth.mso.docType, sessionTranscriptBytes: Data(sessionTranscriptBytes)) else {
                             logger.error("Cannot create signature"); return nil
                         }
-                        devSignedToAdd = DeviceSigned(deviceAuth: .init(coseMacOrSignature: Cose(type: .sign1, algorithm: Cose.MacAlgorithm.hmac256.rawValue, signature: signature)))
+                        devSignedToAdd = DeviceSigned(deviceAuth: .init(coseMacOrSignature: Cose(type: .sign1, algorithm: Cose.VerifyAlgorithm.es256.rawValue, signature: signature)))
                     } else {
                         guard let devAuth = try mdocAuth.getDeviceAuthForTransfer(docType: doc.issuerAuth.mso.docType, dauthMethod: dauthMethod) else {
                             logger.error("Cannot create device auth"); return nil
