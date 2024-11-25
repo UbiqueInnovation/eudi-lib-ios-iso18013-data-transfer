@@ -201,8 +201,9 @@ public class MdocHelpers {
 				if let eReaderKey, let sessionTranscript, dryRun == false {
 					let authKeys = CoseKeyExchange(publicKey: eReaderKey, privateKey: devicePrivateKey)
 					let mdocAuth = MdocAuthentication(transcript: sessionTranscript, authKeys: authKeys)
-                    if let delegate = delegate, let sessionTranscriptBytes = sessionEncryption?.sessionTranscriptBytes, dauthMethod == .deviceSignature {
-                        guard let signature = delegate.signData(documentId: reqDocIdOrDocType, docType: doc.issuerAuth.mso.docType, sessionTranscriptBytes: Data(sessionTranscriptBytes)) else {
+                    if let delegate = delegate, dauthMethod == .deviceSignature {
+                        let sessionTranscriptBytes = Data(sessionTranscript.toCBOR(options: .init()).encode())
+                        guard let signature = delegate.signData(documentId: reqDocIdOrDocType, docType: doc.issuerAuth.mso.docType, sessionTranscriptBytes: sessionTranscriptBytes) else {
                             logger.error("Cannot create signature"); return nil
                         }
                         devSignedToAdd = DeviceSigned(deviceAuth: .init(coseMacOrSignature: Cose(type: .sign1, algorithm: Cose.VerifyAlgorithm.es256.rawValue, signature: signature)))
