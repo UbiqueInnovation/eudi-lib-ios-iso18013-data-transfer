@@ -226,7 +226,9 @@ public class MdocGattServer: @unchecked Sendable, ObservableObject {
 		else if newValue == .initialized {
 			bleDelegate = Delegate(server: self)
 			logger.info("Initializing BLE peripheral manager")
-			peripheralManager = CBPeripheralManager(delegate: bleDelegate, queue: nil)
+            peripheralManager = CBPeripheralManager(delegate: bleDelegate,
+                                                    queue: nil,
+                                                    options: ["CBCentralManagerOptionShowPowerAlertKey": 0])
 			subscribeCount = 0
 		} else if newValue == .disconnected && status != .disconnected {
 			stop()
