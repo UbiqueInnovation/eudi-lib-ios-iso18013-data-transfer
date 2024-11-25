@@ -202,11 +202,24 @@ public class MdocHelpers {
 					let authKeys = CoseKeyExchange(publicKey: eReaderKey, privateKey: devicePrivateKey)
 					let mdocAuth = MdocAuthentication(transcript: sessionTranscript, authKeys: authKeys)
                     if let delegate = delegate, dauthMethod == .deviceSignature {
-                        let sessionTranscriptBytes = Data(sessionTranscript.toCBOR(options: .init()).encode())
-                        guard let signature = delegate.signData(documentId: reqDocIdOrDocType, docType: doc.issuerAuth.mso.docType, sessionTranscriptBytes: sessionTranscriptBytes) else {
+
+                        let sessionTranscriptBytes = Data(sessionTranscript.toCBOR(options: CBOROptions()).encode())
+
+                        guard let signatureCbor = delegate.signData(documentId: reqDocIdOrDocType, docType: doc.issuerAuth.mso.docType, sessionTranscriptBytes: sessionTranscriptBytes) else {
                             logger.error("Cannot create signature"); return nil
                         }
-                        devSignedToAdd = DeviceSigned(deviceAuth: .init(coseMacOrSignature: Cose(type: .sign1, algorithm: Cose.VerifyAlgorithm.es256.rawValue, signature: signature)))
+
+                        guard let cbor = try? CBORDecoder(input: signatureCbor.bytes).decodeItem() else {
+                            logger.error("Cannot decode signature"); return nil
+                        }
+
+                        guard var cose = Cose(type: .sign1, cbor: cbor) else {
+                            logger.error("Cannot create cose"); return nil
+                        }
+
+                        let deviceAuth = DeviceAuth(coseMacOrSignature: cose)
+
+                        devSignedToAdd = DeviceSigned(deviceAuth: deviceAuth)
                     } else {
                         guard let devAuth = try mdocAuth.getDeviceAuthForTransfer(docType: doc.issuerAuth.mso.docType, dauthMethod: dauthMethod) else {
                             logger.error("Cannot create device auth"); return nil
