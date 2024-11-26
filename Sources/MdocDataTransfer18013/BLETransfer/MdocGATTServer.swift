@@ -216,7 +216,7 @@ public class MdocGattServer: @unchecked Sendable, ObservableObject {
 				if decoded.isValidRequest {
 					delegate?.didReceiveRequest(decoded.userRequestInfo, handleSelected: userSelected)
 				} else {
-					userSelected(false, nil)
+                    status = .noMatchingCredentials
 				}
 			case .failure(let err):
 				error = err

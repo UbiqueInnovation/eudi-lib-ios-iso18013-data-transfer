@@ -30,6 +30,7 @@ public enum TransferStatus: String, Sendable {
 	case responseSent
 	case disconnected
 	case error
+    case noMatchingCredentials
 }
 
 /// Possible error codes
